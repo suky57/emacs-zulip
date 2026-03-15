@@ -1,0 +1,10 @@
+# Byte-compiled files
+*.elc
+
+# Package archives
+*.tar
+
+# Auto-save / lock files
+\#*\#
+.\#*
+*~
