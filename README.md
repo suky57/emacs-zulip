@@ -64,9 +64,13 @@ In `~/.doom.d/config.el`:
 ```elisp
 (use-package! zulip
   :commands (zulip-login zulip-connect zulip-home zulip-channels zulip-dms)
-  :config
+  :init
   (require 'zulip-doom))
 ```
+
+> **Note:** `zulip-doom` must be loaded in `:init` (not `:config`) so that
+> the `SPC` leader bindings are registered before any Zulip command is invoked.
+> The file is lightweight — it only sets up autoloads and keybindings.
 
 ### Elpaca
 
