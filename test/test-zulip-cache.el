@@ -183,4 +183,35 @@
     (should (= (zulip--cache-unread-count cache 10 "world") 2))
     (should (= (zulip--cache-unread-count cache 10) 5))))
 
+;;;; Users-sorted
+
+(ert-deftest zulip-cache-users-sorted ()
+  "Non-bot users are returned sorted by full name."
+  (let ((cache (zulip--cache-create)))
+    (zulip--cache-put-user cache (zulip-test--make-user-data 1 "z@x.com" "Zara"))
+    (zulip--cache-put-user cache (zulip-test--make-user-data 2 "a@x.com" "Alice"))
+    (zulip--cache-put-user cache (zulip-test--make-user-data 3 "m@x.com" "Milo"))
+    (let ((sorted (zulip--cache-users-sorted cache)))
+      (should (= (length sorted) 3))
+      (should (string= (zulip--user-full-name (nth 0 sorted)) "Alice"))
+      (should (string= (zulip--user-full-name (nth 1 sorted)) "Milo"))
+      (should (string= (zulip--user-full-name (nth 2 sorted)) "Zara")))))
+
+(ert-deftest zulip-cache-users-sorted-excludes-bots ()
+  "Bot users are excluded from the sorted list."
+  (let ((cache (zulip--cache-create))
+        (bot-data (let ((ht (make-hash-table :test 'equal)))
+                    (puthash "user_id" 99 ht)
+                    (puthash "email" "bot@x.com" ht)
+                    (puthash "full_name" "Notification Bot" ht)
+                    (puthash "avatar_url" nil ht)
+                    (puthash "is_bot" t ht)
+                    ht)))
+    (zulip--cache-put-user cache (zulip-test--make-user-data 1 "a@x.com" "Alice"))
+    (zulip--cache-put-user cache bot-data)
+    (let ((sorted (zulip--cache-users-sorted cache)))
+      (should (= (length sorted) 1))
+      (should (string= (zulip--user-full-name (car sorted)) "Alice")))))
+
+(provide 'test-zulip-cache)
 ;;; test-zulip-cache.el ends here

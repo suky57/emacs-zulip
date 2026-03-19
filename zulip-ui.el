@@ -143,6 +143,13 @@ Otherwise fall back to plain-text tag stripping."
      (t
       (format-time-string "%b %d, %Y %H:%M" time)))))
 
+;;;; Key hint helper
+
+(defsubst zulip--refresh-key-hint ()
+  "Return \"gr\" when Evil is loaded, \"g\" otherwise.
+Evil uses `g' as a prefix key, so refresh is bound to `gr'."
+  (if (featurep 'evil) "gr" "g"))
+
 ;;;; HTML rendering
 
 (defun zulip--insert-content (html)
@@ -300,7 +307,8 @@ Otherwise fall back to plain-text tag stripping."
                                    (propertize
                                     (concat "  [RET] Open  [C] Channels  "
                                             "[D] DMs  [c] Compose  "
-                                            "[g] Refresh  [q] Quit")
+                                            (format "[%s] Refresh  [q] Quit"
+                                                    (zulip--refresh-key-hint)))
                                     'face 'zulip-separator))))
         ;; --- Section: Unread conversations ---
         (let ((unreads (zulip--home-collect-unreads cache conn)))
@@ -410,6 +418,30 @@ Otherwise fall back to plain-text tag stripping."
   (interactive)
   (zulip-dm-list--fetch-and-render zulip--current-connection))
 
+(defun zulip--read-recipient-email (conn)
+  "Read recipient for DM with completion from cached users of CONN.
+Offers non-bot users as \"Full Name <email>\" candidates.
+Falls back to `read-string' when the user cache is empty."
+  (let* ((cache (zulip--connection-cache conn))
+         (self-id (zulip--connection-user-id conn))
+         (candidates nil))
+    (maphash
+     (lambda (_id user)
+       (unless (or (eql (zulip--user-id user) self-id)
+                   (zulip--user-is-bot user))
+         (push (format "%s <%s>"
+                       (zulip--user-full-name user)
+                       (zulip--user-email user))
+               candidates)))
+     (zulip--cache-users cache))
+    (if candidates
+        (let* ((sorted (sort candidates #'string<))
+               (chosen (completing-read "Recipient: " sorted nil t)))
+          (if (string-match "<\\([^>]+\\)>" chosen)
+              (match-string 1 chosen)
+            chosen))
+      (read-string "Recipient email (no users cached): "))))
+
 (defun zulip-home-compose ()
   "Start composing a new message."
   (interactive)
@@ -418,7 +450,8 @@ Otherwise fall back to plain-text tag stripping."
                                nil t)))
     (require 'zulip-compose)
     (if (string= type "Direct message")
-        (let ((email (read-string "Recipient email: ")))
+        (let ((email (zulip--read-recipient-email
+                      zulip--current-connection)))
           (zulip-compose-message zulip--current-connection
                                  "direct" email nil))
       (let* ((ch (completing-read "Channel: "
@@ -529,7 +562,8 @@ Otherwise fall back to plain-text tag stripping."
                            (propertize "  Channels\n" 'face 'bold)
                            (concat "\n"
                                    (propertize
-                                    "  [RET] Topics  [c] Compose  [g] Refresh  [H] Home  [q] Quit"
+                                    (format "  [RET] Topics  [c] Compose  [%s] Refresh  [H] Home  [q] Quit"
+                                            (zulip--refresh-key-hint))
                                     'face 'zulip-separator))))
         (dolist (ch (zulip--cache-channels-sorted
                      (zulip--connection-cache conn)))
@@ -676,7 +710,8 @@ Otherwise fall back to plain-text tag stripping."
                            (propertize (format "  #%s\n" channel-name) 'face 'bold)
                            (concat "\n"
                                    (propertize
-                                    "  [RET] Messages  [c] Compose  [g] Refresh  [H] Home  [q] Back"
+                                    (format "  [RET] Messages  [c] Compose  [%s] Refresh  [H] Home  [q] Back"
+                                            (zulip--refresh-key-hint))
                                     'face 'zulip-separator))))
         (when (vectorp topics)
           (let ((sorted (sort (append topics nil)
@@ -849,7 +884,8 @@ Otherwise fall back to plain-text tag stripping."
                            ""
                            (concat "\n"
                                    (propertize
-                                    "  [c] Reply  [G] Load more  [g] Refresh  [H] Home  [q] Back"
+                                    (format "  [c] Reply  [G] Load more  [%s] Refresh  [H] Home  [q] Back"
+                                            (zulip--refresh-key-hint))
                                     'face 'zulip-separator))))
         (when (vectorp msgs)
           (seq-do (lambda (m) (ewoc-enter-last zulip--ewoc m)) msgs)
@@ -1073,7 +1109,8 @@ Otherwise fall back to plain-text tag stripping."
                            (propertize "  Direct Messages\n" 'face 'bold)
                            (concat "\n"
                                    (propertize
-                                    "  [RET] Open  [c] New DM  [g] Refresh  [H] Home  [q] Back"
+                                    (format "  [RET] Open  [c] New DM  [%s] Refresh  [H] Home  [q] Back"
+                                            (zulip--refresh-key-hint))
                                     'face 'zulip-separator))))
         (dolist (entry entries)
           (ewoc-enter-last zulip--ewoc entry))
@@ -1097,7 +1134,7 @@ Otherwise fall back to plain-text tag stripping."
 (defun zulip-dm-list-compose ()
   "Compose a new DM."
   (interactive)
-  (let ((email (read-string "Recipient email: ")))
+  (let ((email (zulip--read-recipient-email zulip--current-connection)))
     (require 'zulip-compose)
     (zulip-compose-message zulip--current-connection
                            "direct" email nil)))
@@ -1184,7 +1221,8 @@ Otherwise fall back to plain-text tag stripping."
                            ""
                            (concat "\n"
                                    (propertize
-                                    "  [c] Reply  [G] Load more  [g] Refresh  [H] Home  [q] Back"
+                                    (format "  [c] Reply  [G] Load more  [%s] Refresh  [H] Home  [q] Back"
+                                            (zulip--refresh-key-hint))
                                     'face 'zulip-separator))))
         (when (vectorp msgs)
           (seq-do (lambda (m) (ewoc-enter-last zulip--ewoc m)) msgs)

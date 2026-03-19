@@ -190,6 +190,17 @@ Deduplicates by message ID."
                    (string< (zulip--channel-name a)
                             (zulip--channel-name b))))))
 
+(defun zulip--cache-users-sorted (cache)
+  "Return non-bot users from CACHE as a list sorted by full name."
+  (let (result)
+    (maphash (lambda (_id user)
+               (unless (zulip--user-is-bot user)
+                 (push user result)))
+             (zulip--cache-users cache))
+    (sort result (lambda (a b)
+                   (string< (zulip--user-full-name a)
+                            (zulip--user-full-name b))))))
+
 ;;;; Cache — Clear
 
 (defun zulip--cache-clear-topics (cache channel-id)
