@@ -45,6 +45,7 @@ Each function is called with (CONN TYPE TO TOPIC).")
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map text-mode-map)
     (define-key map (kbd "C-c C-c") #'zulip-compose-send)
+    (define-key map (kbd "C-c C-a") #'zulip-compose-attach-file)
     (define-key map (kbd "C-c C-k") #'zulip-compose-cancel)
     map)
   "Keymap for `zulip-compose-mode'.")
@@ -56,7 +57,7 @@ Each function is called with (CONN TYPE TO TOPIC).")
 \\[zulip-compose-send]  Send message
 \\[zulip-compose-cancel]  Cancel"
   (setq header-line-format
-        (propertize " C-c C-c: Send  |  C-c C-k: Cancel"
+        (propertize " C-c C-c: Send  |  C-c C-a: Attach  |  C-c C-k: Cancel"
                     'face 'bold)))
 
 ;;;; Entry point
@@ -138,6 +139,34 @@ TOPIC — topic string (stream only, prompted if nil)."
   (interactive)
   (when (yes-or-no-p "Discard this message? ")
     (kill-buffer (current-buffer))))
+
+;;;; Attach File
+
+(defun zulip-compose-attach-file (file)
+  "Upload FILE to Zulip and insert a Markdown link in the message body.\nThe link is appended at the end of the message."
+  (interactive (list (read-file-name "Attach file: " nil nil t)))
+  (unless zulip--compose-connection
+    (user-error "No Zulip connection for this compose buffer"))
+  (unless (file-readable-p file)
+    (user-error "Cannot read file: %s" file))
+  (let ((filename (file-name-nondirectory file))
+        (conn zulip--compose-connection)
+        (buf (current-buffer)))
+    (message "Zulip: uploading %s…" filename)
+    (zulip--api-upload-file
+     conn file
+     (lambda (uri)
+       (if (null uri)
+           (message "Zulip: upload failed for %s" filename)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (let* ((server (zulip--connection-server conn))
+                    (full-url (concat server uri))
+                    (link (format "[%s](%s)" filename full-url)))
+               (goto-char (point-max))
+               (unless (bolp) (insert "\n"))
+               (insert link)
+               (message "Zulip: attached %s" filename)))))))))
 
 (provide 'zulip-compose)
 ;;; zulip-compose.el ends here

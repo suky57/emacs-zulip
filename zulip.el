@@ -48,6 +48,10 @@
 (require 'zulip-events)
 (require 'zulip-ui)
 
+;; Forward declarations
+(declare-function dired-get-filename "dired")
+(declare-function zulip-compose-message "zulip-compose")
+
 ;;;; Customization
 
 (defgroup zulip nil
@@ -326,6 +330,87 @@ Shows the home dashboard for the last connected server."
                   (zulip--pick-connection "Show DMs for: "))))
     (when conn
       (zulip-dm-list--fetch-and-render conn))))
+
+;;;; Compose
+
+;;;###autoload
+(defun zulip-compose ()
+  "Compose a new Zulip message.\nPrompts for message type (channel or DM) and destination.\nWorks from any buffer — picks an active connection automatically."
+  (interactive)
+  (let ((conn (or (and (bound-and-true-p zulip--current-connection)
+                       zulip--current-connection)
+                  (zulip--pick-connection "Compose on: "))))
+    (when conn
+      (let ((type (completing-read "Message type: "
+                                   '("Channel message" "Direct message")
+                                   nil t)))
+        (require 'zulip-compose)
+        (if (string= type "Direct message")
+            (let ((email (zulip--read-recipient-email conn)))
+              (zulip-compose-message conn "direct" email nil))
+          (let* ((ch (completing-read
+                      "Channel: "
+                      (mapcar #'zulip--channel-name
+                              (zulip--cache-channels-sorted
+                               (zulip--connection-cache conn)))))
+                 (topic (read-string (format "Topic in #%s: " ch))))
+            (zulip-compose-message conn "stream" ch topic)))))))
+
+;;;; File Upload / Send
+
+;;;###autoload
+(defun zulip-send-file (file)
+  "Upload FILE to Zulip and send it as a message.\nPrompts for destination (channel + topic, or DM).\nWhen called from `dired-mode', uses the file at point."
+  (interactive
+   (list (if (derived-mode-p 'dired-mode)
+             (dired-get-filename)
+           (read-file-name "File to upload: " nil nil t))))
+  (unless (file-readable-p file)
+    (user-error "Cannot read file: %s" file))
+  (let ((conn (or (and (bound-and-true-p zulip--current-connection)
+                       zulip--current-connection)
+                  (zulip--pick-connection "Upload to: "))))
+    (unless conn
+      (user-error "No active Zulip connections — use M-x zulip-login"))
+    (let* ((filename (file-name-nondirectory file))
+           (type (completing-read
+                  (format "Send \"%s\" to: " filename)
+                  '("Channel" "Direct message") nil t))
+           dest-type dest-to dest-topic)
+      (if (string= type "Channel")
+          (let* ((ch (completing-read
+                      "Channel: "
+                      (mapcar #'zulip--channel-name
+                              (zulip--cache-channels-sorted
+                               (zulip--connection-cache conn)))))
+                 (topic (read-string (format "Topic in #%s: " ch))))
+            (setq dest-type "stream"
+                  dest-to ch
+                  dest-topic topic))
+        (let ((email (zulip--read-recipient-email conn)))
+          (setq dest-type "direct"
+                dest-to email
+                dest-topic nil)))
+      (message "Zulip: uploading %s…" filename)
+      (zulip--api-upload-file
+       conn file
+       (lambda (uri)
+         (if (null uri)
+             (message "Zulip: upload failed for %s" filename)
+           (let* ((server (zulip--connection-server conn))
+                  (full-url (concat server uri))
+                  (content (format "[%s](%s)" filename full-url)))
+             (message "Zulip: sending %s…" filename)
+             (zulip--api-send-message
+              conn dest-type dest-to dest-topic content
+              (lambda (data)
+                (if data
+                    (message "Zulip: sent %s to %s"
+                             filename
+                             (if dest-topic
+                                 (format "#%s > %s" dest-to dest-topic)
+                               dest-to))
+                  (message "Zulip: failed to send %s" filename)))))))))))
 
 ;;;; Switch Server
 

@@ -29,17 +29,29 @@
 
 ;; Lightweight autoload declarations — avoids (require 'zulip) so this
 ;; file can be loaded at init time without pulling in the full client.
-(autoload 'zulip-home     "zulip" "Open Zulip home dashboard." t)
-(autoload 'zulip-login    "zulip" "Connect to a Zulip server." t)
-(autoload 'zulip-channels "zulip" "Open Zulip channel list." t)
-(autoload 'zulip-dms      "zulip" "Open Zulip DM conversations." t)
+(autoload 'zulip-home          "zulip" "Open Zulip home dashboard." t)
+(autoload 'zulip-login         "zulip" "Connect to a Zulip server." t)
+(autoload 'zulip-connect       "zulip" "Connect using .zuliprc." t)
+(autoload 'zulip-channels      "zulip" "Open Zulip channel list." t)
+(autoload 'zulip-dms           "zulip" "Open Zulip DM conversations." t)
+(autoload 'zulip-compose       "zulip" "Compose a new Zulip message." t)
+(autoload 'zulip-send-file     "zulip" "Upload a file to Zulip." t)
+(autoload 'zulip-switch-server "zulip" "Switch Zulip server." t)
+(autoload 'zulip-logout        "zulip" "Disconnect from Zulip." t)
 
 (when (fboundp 'map!)
-  ;; Global leader bindings
+  ;; SPC o z as the Zulip prefix — all commands under one roof
   (eval '(map! :leader
-               :desc "Zulip Home"     "o z"   #'zulip-home
-               :desc "Zulip Login"    "o Z"   #'zulip-login
-               :desc "Zulip Channels" "o C-z" #'zulip-channels)))
+               (:prefix ("o z" . "Zulip")
+                :desc "Home"          "h" #'zulip-home
+                :desc "Login"         "l" #'zulip-login
+                :desc "Connect"       "c" #'zulip-connect
+                :desc "Channels"      "C" #'zulip-channels
+                :desc "DMs"           "d" #'zulip-dms
+                :desc "Compose"       "m" #'zulip-compose
+                :desc "Send file"     "a" #'zulip-send-file
+                :desc "Switch server" "s" #'zulip-switch-server
+                :desc "Logout"        "q" #'zulip-logout))))
 
 (provide 'zulip-doom)
 ;;; zulip-doom.el ends here

@@ -284,6 +284,98 @@ CALLBACK receives parsed register response or nil."
      `(("queue_id" . ,(zulip--connection-queue-id conn)))
      callback)))
 
+;;;; File Upload
+
+(defun zulip--api-generate-boundary ()
+  "Generate a unique MIME multipart boundary string."
+  (format "----ZulipEmacs%s%06d"
+          (format-time-string "%s" (current-time))
+          (random 999999)))
+
+(defun zulip--api-mime-type (filename)
+  "Guess MIME type for FILENAME based on file extension."
+  (let ((ext (downcase (or (file-name-extension filename) ""))))
+    (pcase ext
+      ("png"  "image/png")
+      ("jpg"  "image/jpeg")
+      ("jpeg" "image/jpeg")
+      ("gif"  "image/gif")
+      ("webp" "image/webp")
+      ("svg"  "image/svg+xml")
+      ("pdf"  "application/pdf")
+      ("txt"  "text/plain")
+      ("md"   "text/markdown")
+      ("org"  "text/plain")
+      ("html" "text/html")
+      ("json" "application/json")
+      ("csv"  "text/csv")
+      ("zip"  "application/zip")
+      ("gz"   "application/gzip")
+      ("tar"  "application/x-tar")
+      ("el"   "text/plain")
+      ("py"   "text/plain")
+      ("js"   "text/javascript")
+      ("ts"   "text/plain")
+      (_      "application/octet-stream"))))
+
+(defun zulip--api-build-multipart-body (boundary file-path)
+  "Build a multipart/form-data body with BOUNDARY for FILE-PATH.\nReturn a unibyte string suitable for `url-request-data'."
+  (let ((filename (encode-coding-string
+                   (file-name-nondirectory file-path) 'utf-8))
+        (mime-type (zulip--api-mime-type
+                    (file-name-nondirectory file-path))))
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert "--" boundary "\r\n"
+              "Content-Disposition: form-data; name=\"file\"; filename=\""
+              filename "\"\r\n"
+              "Content-Type: " mime-type "\r\n"
+              "\r\n")
+      (insert-file-contents-literally file-path)
+      (goto-char (point-max))
+      (insert "\r\n--" boundary "--\r\n")
+      (buffer-string))))
+
+(defun zulip--api-upload-file (conn file-path callback)
+  "Upload FILE-PATH to CONN's Zulip server.\nCALLBACK is called with the upload URI string (e.g. \"/user_uploads/…\")\non success, or nil on failure."
+  (unless (file-readable-p file-path)
+    (user-error "Cannot read file: %s" file-path))
+  (let* ((boundary (zulip--api-generate-boundary))
+         (url-request-method "POST")
+         (url-request-extra-headers
+          `(("Authorization" . ,(zulip--api-auth-header conn))
+            ("User-Agent"    . ,zulip--user-agent)
+            ("Content-Type"  . ,(format "multipart/form-data; boundary=%s"
+                                        boundary))))
+         (url-request-data
+          (zulip--api-build-multipart-body boundary file-path))
+         (url (zulip--api-url conn "/user_uploads")))
+    (url-retrieve
+     url
+     (lambda (status)
+       (unwind-protect
+           (let ((data (zulip--api-parse-response))
+                 (http-err (plist-get status :error)))
+             (cond
+              ((and http-err data (gethash "msg" data))
+               (message "Zulip: upload error — %s" (gethash "msg" data))
+               (when callback (run-at-time 0 nil callback nil)))
+              (http-err
+               (message "Zulip: upload network error: %S" http-err)
+               (when callback (run-at-time 0 nil callback nil)))
+              ((null data)
+               (message "Zulip: empty response from upload")
+               (when callback (run-at-time 0 nil callback nil)))
+              ((equal (gethash "result" data) "success")
+               (when callback
+                 (run-at-time 0 nil callback (gethash "uri" data))))
+              (t
+               (message "Zulip: upload failed — %s"
+                        (gethash "msg" data "unknown error"))
+               (when callback (run-at-time 0 nil callback nil)))))
+         (kill-buffer (current-buffer))))
+     nil t t)))
+
 ;;;; Narrow construction helpers
 
 (defun zulip--narrow-channel-topic (channel-name topic)
