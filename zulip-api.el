@@ -17,47 +17,6 @@
 (require 'json)
 (require 'zulip-cache)
 
-;;;; url.el multibyte workaround (Emacs Bug#23750)
-;;
-;; `url-http-create-request' concatenates multibyte header strings with
-;; the (unibyte) body in `url-request-data'.  The result is a multibyte
-;; string whose `string-bytes' exceeds its `length', which the function
-;; then rejects with "Multibyte text in HTTP request" — before returning,
-;; so a :filter-return advice cannot help.
-;;
-;; Fix: :around advice that, when `url-request-data' contains bytes>127,
-;; substitutes an ASCII placeholder of the same length (preserving the
-;; Content-length header the function computes), then splices the real
-;; binary body back into the unibyte result.
-
-(defun zulip--api-fix-multibyte-request (orig-fun &rest args)
-  "Around advice for `url-http-create-request' (Emacs Bug#23750).
-When `url-request-data' is a unibyte string with bytes above 127,
-substitute an ASCII placeholder so the function can build headers
-with a correct Content-length without hitting the multibyte check,
-then splice the real binary body back."
-  (let ((body url-request-data))
-    (if (not (and body
-                  (not (multibyte-string-p body))
-                  (string-match-p "[\200-\377]" body)))
-        ;; No high bytes — call normally.
-        (apply orig-fun args)
-      ;; Binary body: swap in same-length ASCII filler.
-      (let* ((url-request-data (make-string (length body) ?X))
-             (request (apply orig-fun args))
-             (sep (string-search "\r\n\r\n" request)))
-        (if sep
-            (concat (encode-coding-string
-                     (substring request 0 (+ sep 4))
-                     'raw-text-unix)
-                    body)
-          ;; Shouldn't happen; return best-effort encoding.
-          (encode-coding-string request 'raw-text-unix))))))
-
-(with-eval-after-load 'url-http
-  (advice-add 'url-http-create-request :around
-              #'zulip--api-fix-multibyte-request))
-
 ;;;; Constants
 
 (defconst zulip--api-version "v1"
@@ -391,44 +350,65 @@ CALLBACK receives parsed register response or nil."
                           'no-conversion)))
 
 (defun zulip--api-upload-file (conn file-path callback)
-  "Upload FILE-PATH to CONN's Zulip server.\nCALLBACK is called with the upload URI string (e.g. \"/user_uploads/…\")\non success, or nil on failure."
+  "Upload FILE-PATH to CONN's Zulip server via curl.
+CALLBACK is called with the upload URL string (e.g. \"/user_uploads/…\")
+on success, or nil on failure.
+
+Uses curl as an external process for the upload because Emacs's built-in
+url.el cannot reliably send binary data (Emacs Bug#23750)."
   (unless (file-readable-p file-path)
     (user-error "Cannot read file: %s" file-path))
-  (let* ((boundary (zulip--api-generate-boundary))
-         (url-request-method "POST")
-         (url-request-extra-headers
-          `(("Authorization" . ,(zulip--api-auth-header conn))
-            ("User-Agent"    . ,zulip--user-agent)
-            ("Content-Type"  . ,(format "multipart/form-data; boundary=%s"
-                                        boundary))))
-         (url-request-data
-          (zulip--api-build-multipart-body boundary file-path))
-         (url (zulip--api-url conn "/user_uploads")))
-    (url-retrieve
-     url
-     (lambda (status)
-       (unwind-protect
-           (let ((data (zulip--api-parse-response))
-                 (http-err (plist-get status :error)))
-             (cond
-              ((and http-err data (gethash "msg" data))
-               (message "Zulip: upload error — %s" (gethash "msg" data))
-               (when callback (run-at-time 0 nil callback nil)))
-              (http-err
-               (message "Zulip: upload network error: %S" http-err)
-               (when callback (run-at-time 0 nil callback nil)))
-              ((null data)
-               (message "Zulip: empty response from upload")
-               (when callback (run-at-time 0 nil callback nil)))
-              ((equal (gethash "result" data) "success")
-               (when callback
-                 (run-at-time 0 nil callback (gethash "uri" data))))
-              (t
-               (message "Zulip: upload failed — %s"
-                        (gethash "msg" data "unknown error"))
-               (when callback (run-at-time 0 nil callback nil)))))
-         (kill-buffer (current-buffer))))
-     nil t t)))
+  (unless (executable-find "curl")
+    (user-error "curl is required for file uploads but was not found"))
+  (let* ((url (zulip--api-url conn "/user_uploads"))
+         (auth (concat (zulip--connection-email conn)
+                       ":" (zulip--connection-api-key conn)))
+         (buf (generate-new-buffer " *zulip-upload*")))
+    (message "Zulip: uploading %s…" (file-name-nondirectory file-path))
+    (make-process
+     :name "zulip-upload"
+     :buffer buf
+     :command (list "curl" "--silent" "--show-error"
+                    "-X" "POST"
+                    "-u" auth
+                    "-H" (format "User-Agent: %s" zulip--user-agent)
+                    "-F" (format "file=@%s" (expand-file-name file-path))
+                    url)
+     :sentinel
+     (lambda (proc _event)
+       (when (memq (process-status proc) '(exit signal))
+         (unwind-protect
+             (let* ((exit-code (process-exit-status proc))
+                    (output (with-current-buffer buf (buffer-string)))
+                    (data (condition-case nil
+                              (with-temp-buffer
+                                (insert output)
+                                (goto-char (point-min))
+                                (zulip--json-parse))
+                            (error nil))))
+               (cond
+                ;; curl itself failed (non-zero exit, no valid JSON)
+                ((and (/= exit-code 0) (null data))
+                 (message "Zulip: upload failed (curl exit %d): %s"
+                          exit-code (string-trim output))
+                 (when callback (run-at-time 0 nil callback nil)))
+                ;; Zulip returned success
+                ((and data (equal (gethash "result" data) "success"))
+                 (let ((upload-url (or (gethash "url" data)
+                                      (gethash "uri" data))))
+                   (message "Zulip: upload complete.")
+                   (when callback
+                     (run-at-time 0 nil callback upload-url))))
+                ;; Zulip returned an error with a message
+                ((and data (gethash "msg" data))
+                 (message "Zulip: upload error — %s"
+                          (gethash "msg" data))
+                 (when callback (run-at-time 0 nil callback nil)))
+                ;; Something else went wrong
+                (t
+                 (message "Zulip: upload failed — unexpected response")
+                 (when callback (run-at-time 0 nil callback nil)))))
+           (kill-buffer buf)))))))
 
 ;;;; Narrow construction helpers
 
