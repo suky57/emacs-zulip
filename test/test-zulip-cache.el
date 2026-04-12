@@ -213,5 +213,28 @@
       (should (= (length sorted) 1))
       (should (string= (zulip--user-full-name (car sorted)) "Alice")))))
 
+;;;; Find channel by name
+
+(ert-deftest zulip-cache-find-channel-by-name-found ()
+  "Find an existing channel by its name."
+  (let ((cache (zulip--cache-create)))
+    (zulip--cache-put-channel cache (zulip-test--make-channel-data 10 "general"))
+    (zulip--cache-put-channel cache (zulip-test--make-channel-data 20 "random"))
+    (let ((ch (zulip--cache-find-channel-by-name cache "general")))
+      (should ch)
+      (should (= (zulip--channel-id ch) 10))
+      (should (string= (zulip--channel-name ch) "general")))))
+
+(ert-deftest zulip-cache-find-channel-by-name-not-found ()
+  "Return nil for a non-existent channel name."
+  (let ((cache (zulip--cache-create)))
+    (zulip--cache-put-channel cache (zulip-test--make-channel-data 10 "general"))
+    (should (null (zulip--cache-find-channel-by-name cache "nonexistent")))))
+
+(ert-deftest zulip-cache-find-channel-by-name-empty ()
+  "Return nil on an empty cache."
+  (let ((cache (zulip--cache-create)))
+    (should (null (zulip--cache-find-channel-by-name cache "anything")))))
+
 (provide 'test-zulip-cache)
 ;;; test-zulip-cache.el ends here

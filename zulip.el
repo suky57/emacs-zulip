@@ -353,18 +353,25 @@ Shows the home dashboard for the last connected server."
                       (mapcar #'zulip--channel-name
                               (zulip--cache-channels-sorted
                                (zulip--connection-cache conn)))))
-                 (topic (read-string (format "Topic in #%s: " ch))))
+                 (topic (zulip--read-topic conn ch)))
             (zulip-compose-message conn "stream" ch topic)))))))
 
 ;;;; File Upload / Send
 
 ;;;###autoload
 (defun zulip-send-file (file)
-  "Upload FILE to Zulip and send it as a message.\nPrompts for destination (channel + topic, or DM).\nWhen called from `dired-mode', uses the file at point."
+  "Upload FILE to Zulip and send it as a message.\nPrompts for destination (channel + topic, or DM).\nIn `dired-mode', uses the file at point.  In a file-visiting buffer,\ndefaults to the current file.  Otherwise prompts."
   (interactive
-   (list (if (derived-mode-p 'dired-mode)
-             (dired-get-filename)
-           (read-file-name "File to upload: " nil nil t))))
+   (list (cond
+          ((derived-mode-p 'dired-mode)
+           (dired-get-filename))
+          (buffer-file-name
+           (read-file-name "File to upload: "
+                           (file-name-directory buffer-file-name)
+                           buffer-file-name t
+                           (file-name-nondirectory buffer-file-name)))
+          (t
+           (read-file-name "File to upload: " nil nil t)))))
   (unless (file-readable-p file)
     (user-error "Cannot read file: %s" file))
   (let ((conn (or (and (bound-and-true-p zulip--current-connection)
@@ -383,7 +390,7 @@ Shows the home dashboard for the last connected server."
                       (mapcar #'zulip--channel-name
                               (zulip--cache-channels-sorted
                                (zulip--connection-cache conn)))))
-                 (topic (read-string (format "Topic in #%s: " ch))))
+                 (topic (zulip--read-topic conn ch)))
             (setq dest-type "stream"
                   dest-to ch
                   dest-topic topic))

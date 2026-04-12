@@ -102,6 +102,94 @@ Each element of USERS is (id email full-name &optional is-bot)."
       (should (string-match-p "Milo"  (nth 1 offered-candidates)))
       (should (string-match-p "Zara"  (nth 2 offered-candidates))))))
 
+;;;; zulip--read-topic
+
+(ert-deftest zulip-ui-read-topic-with-cached-topics ()
+  "When topics are cached, they are offered as completion candidates."
+  (let* ((cache (zulip--cache-create))
+         (conn (zulip--connection-create
+                :server "https://test.zulip.com"
+                :email "t@t.com" :api-key "k"
+                :user-id 1 :cache cache))
+         (offered nil))
+    ;; Seed a channel and its topics
+    (zulip--cache-put-channel cache (let ((ht (make-hash-table :test 'equal)))
+                                      (puthash "stream_id" 10 ht)
+                                      (puthash "name" "general" ht)
+                                      (puthash "description" "" ht)
+                                      ht))
+    (zulip--cache-put-topics cache 10
+                              (vector (let ((ht (make-hash-table :test 'equal)))
+                                        (puthash "name" "greetings" ht)
+                                        (puthash "max_id" 100 ht)
+                                        ht)
+                                      (let ((ht (make-hash-table :test 'equal)))
+                                        (puthash "name" "bugs" ht)
+                                        (puthash "max_id" 200 ht)
+                                        ht)))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt candidates &rest _)
+                 (setq offered candidates)
+                 "greetings")))
+      (let ((result (zulip--read-topic conn "general")))
+        (should (string= result "greetings"))
+        (should (member "greetings" offered))
+        (should (member "bugs" offered))))))
+
+(ert-deftest zulip-ui-read-topic-allows-new-topic ()
+  "Free-form input (new topic) is accepted via completing-read."
+  (let* ((cache (zulip--cache-create))
+         (conn (zulip--connection-create
+                :server "https://test.zulip.com"
+                :email "t@t.com" :api-key "k"
+                :user-id 1 :cache cache)))
+    (zulip--cache-put-channel cache (let ((ht (make-hash-table :test 'equal)))
+                                      (puthash "stream_id" 10 ht)
+                                      (puthash "name" "general" ht)
+                                      (puthash "description" "" ht)
+                                      ht))
+    (zulip--cache-put-topics cache 10
+                              (vector (let ((ht (make-hash-table :test 'equal)))
+                                        (puthash "name" "existing" ht)
+                                        (puthash "max_id" 100 ht)
+                                        ht)))
+    ;; Simulate typing a new topic name (not in candidates)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _candidates &rest _)
+                 "brand-new-topic")))
+      (should (string= (zulip--read-topic conn "general")
+                        "brand-new-topic")))))
+
+(ert-deftest zulip-ui-read-topic-no-cached-topics ()
+  "When no topics are cached, falls back to read-string."
+  (let* ((cache (zulip--cache-create))
+         (conn (zulip--connection-create
+                :server "https://test.zulip.com"
+                :email "t@t.com" :api-key "k"
+                :user-id 1 :cache cache)))
+    ;; Channel exists but no topics cached
+    (zulip--cache-put-channel cache (let ((ht (make-hash-table :test 'equal)))
+                                      (puthash "stream_id" 10 ht)
+                                      (puthash "name" "general" ht)
+                                      (puthash "description" "" ht)
+                                      ht))
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (_prompt) "typed-topic")))
+      (should (string= (zulip--read-topic conn "general")
+                        "typed-topic")))))
+
+(ert-deftest zulip-ui-read-topic-unknown-channel ()
+  "When channel is not in cache, falls back to read-string."
+  (let* ((cache (zulip--cache-create))
+         (conn (zulip--connection-create
+                :server "https://test.zulip.com"
+                :email "t@t.com" :api-key "k"
+                :user-id 1 :cache cache)))
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (_prompt) "new-topic")))
+      (should (string= (zulip--read-topic conn "nonexistent")
+                        "new-topic")))))
+
 ;;;; zulip--refresh-key-hint
 
 (ert-deftest zulip-ui-refresh-hint-no-evil ()

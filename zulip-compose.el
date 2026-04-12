@@ -16,6 +16,9 @@
 (require 'zulip-cache)
 (require 'zulip-api)
 
+;; Forward declarations
+(declare-function zulip--read-topic "zulip-ui")
+
 ;;;; Hook
 
 (defvar zulip-after-send-message-hook nil
@@ -71,7 +74,7 @@ TOPIC — topic string (stream only, prompted if nil)."
   (interactive)
   ;; Prompt for topic if needed
   (when (and (string= type "stream") (null topic))
-    (setq topic (read-string (format "Topic in #%s: " to))))
+    (setq topic (zulip--read-topic conn to)))
   ;; Create compose buffer
   (let* ((label (if (string= type "stream")
                     (format "#%s > %s" to topic)

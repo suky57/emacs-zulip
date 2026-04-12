@@ -442,6 +442,22 @@ Falls back to `read-string' when the user cache is empty."
             chosen))
       (read-string "Recipient email (no users cached): "))))
 
+(defun zulip--read-topic (conn channel-name)
+  "Read a topic name for CHANNEL-NAME on CONN with completion.
+Offers existing cached topics as candidates but allows free-form
+input for new topics.  Falls back to plain `read-string' when no
+topics are cached."
+  (let* ((cache (zulip--connection-cache conn))
+         (ch (zulip--cache-find-channel-by-name cache channel-name))
+         (topics (when ch
+                   (zulip--cache-get-topics cache (zulip--channel-id ch))))
+         (candidates (when (vectorp topics)
+                       (mapcar #'zulip--topic-name (append topics nil)))))
+    (if candidates
+        (completing-read (format "Topic in #%s: " channel-name)
+                         candidates nil nil)
+      (read-string (format "Topic in #%s (new): " channel-name)))))
+
 (defun zulip-home-compose ()
   "Start composing a new message."
   (interactive)
@@ -459,7 +475,7 @@ Falls back to `read-string' when the user cache is empty."
                                           (zulip--cache-channels-sorted
                                            (zulip--connection-cache
                                             zulip--current-connection)))))
-             (topic (read-string (format "Topic in #%s: " ch))))
+             (topic (zulip--read-topic zulip--current-connection ch)))
         (zulip-compose-message zulip--current-connection
                                "stream" ch topic)))))
 
@@ -591,8 +607,8 @@ Falls back to `read-string' when the user cache is empty."
   (let ((node (ewoc-locate zulip--ewoc)))
     (when node
       (let* ((chan (ewoc-data node))
-             (topic (read-string (format "Topic in #%s: "
-                                         (zulip--channel-name chan)))))
+             (topic (zulip--read-topic zulip--current-connection
+                                       (zulip--channel-name chan))))
         (require 'zulip-compose)
         (zulip-compose-message zulip--current-connection
                                "stream"

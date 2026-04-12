@@ -179,6 +179,16 @@ Deduplicates by message ID."
   (gethash (zulip--message-key channel-id topic)
            (zulip--cache-messages cache)))
 
+(defun zulip--cache-find-channel-by-name (cache name)
+  "Find the `zulip--channel' with NAME in CACHE, or nil."
+  (let ((found nil))
+    (maphash
+     (lambda (_id ch)
+       (when (string= (zulip--channel-name ch) name)
+         (setq found ch)))
+     (zulip--cache-channels cache))
+    found))
+
 ;;;; Cache — Sorting & Listing
 
 (defun zulip--cache-channels-sorted (cache)
