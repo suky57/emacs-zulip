@@ -22,18 +22,41 @@
 ;; `url-http-create-request' concatenates multibyte header strings with
 ;; the (unibyte) body in `url-request-data'.  The result is a multibyte
 ;; string whose `string-bytes' exceeds its `length', which the function
-;; then rejects with "Multibyte text in HTTP request".  We advise it to
-;; force the return value to unibyte — always safe for HTTP byte streams.
+;; then rejects with "Multibyte text in HTTP request" — before returning,
+;; so a :filter-return advice cannot help.
+;;
+;; Fix: :around advice that, when `url-request-data' contains bytes>127,
+;; substitutes an ASCII placeholder of the same length (preserving the
+;; Content-length header the function computes), then splices the real
+;; binary body back into the unibyte result.
 
-(defun zulip--api-force-unibyte-request (request)
-  "Ensure HTTP REQUEST string is unibyte."
-  (if (multibyte-string-p request)
-      (encode-coding-string request 'raw-text-unix)
-    request))
+(defun zulip--api-fix-multibyte-request (orig-fun &rest args)
+  "Around advice for `url-http-create-request' (Emacs Bug#23750).
+When `url-request-data' is a unibyte string with bytes above 127,
+substitute an ASCII placeholder so the function can build headers
+with a correct Content-length without hitting the multibyte check,
+then splice the real binary body back."
+  (let ((body url-request-data))
+    (if (not (and body
+                  (not (multibyte-string-p body))
+                  (string-match-p "[\200-\377]" body)))
+        ;; No high bytes — call normally.
+        (apply orig-fun args)
+      ;; Binary body: swap in same-length ASCII filler.
+      (let* ((url-request-data (make-string (length body) ?X))
+             (request (apply orig-fun args))
+             (sep (string-search "\r\n\r\n" request)))
+        (if sep
+            (concat (encode-coding-string
+                     (substring request 0 (+ sep 4))
+                     'raw-text-unix)
+                    body)
+          ;; Shouldn't happen; return best-effort encoding.
+          (encode-coding-string request 'raw-text-unix))))))
 
 (with-eval-after-load 'url-http
-  (advice-add 'url-http-create-request :filter-return
-              #'zulip--api-force-unibyte-request))
+  (advice-add 'url-http-create-request :around
+              #'zulip--api-fix-multibyte-request))
 
 ;;;; Constants
 
