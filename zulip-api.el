@@ -17,6 +17,24 @@
 (require 'json)
 (require 'zulip-cache)
 
+;;;; url.el multibyte workaround (Emacs Bug#23750)
+;;
+;; `url-http-create-request' concatenates multibyte header strings with
+;; the (unibyte) body in `url-request-data'.  The result is a multibyte
+;; string whose `string-bytes' exceeds its `length', which the function
+;; then rejects with "Multibyte text in HTTP request".  We advise it to
+;; force the return value to unibyte — always safe for HTTP byte streams.
+
+(defun zulip--api-force-unibyte-request (request)
+  "Ensure HTTP REQUEST string is unibyte."
+  (if (multibyte-string-p request)
+      (encode-coding-string request 'raw-text-unix)
+    request))
+
+(with-eval-after-load 'url-http
+  (advice-add 'url-http-create-request :filter-return
+              #'zulip--api-force-unibyte-request))
+
 ;;;; Constants
 
 (defconst zulip--api-version "v1"
