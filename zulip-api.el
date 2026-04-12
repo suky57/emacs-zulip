@@ -320,21 +320,27 @@ CALLBACK receives parsed register response or nil."
 
 (defun zulip--api-build-multipart-body (boundary file-path)
   "Build a multipart/form-data body with BOUNDARY for FILE-PATH.\nReturn a unibyte string suitable for `url-request-data'."
-  (let ((filename (encode-coding-string
-                   (file-name-nondirectory file-path) 'utf-8))
-        (mime-type (zulip--api-mime-type
-                    (file-name-nondirectory file-path))))
-    (with-temp-buffer
-      (set-buffer-multibyte nil)
-      (insert "--" boundary "\r\n"
-              "Content-Disposition: form-data; name=\"file\"; filename=\""
-              filename "\"\r\n"
-              "Content-Type: " mime-type "\r\n"
-              "\r\n")
-      (insert-file-contents-literally file-path)
-      (goto-char (point-max))
-      (insert "\r\n--" boundary "--\r\n")
-      (buffer-string))))
+  (let* ((filename (file-name-nondirectory file-path))
+         (mime-type (zulip--api-mime-type filename))
+         ;; encode-coding-string always returns unibyte.
+         (header (encode-coding-string
+                  (concat "--" boundary "\r\n"
+                          "Content-Disposition: form-data;"
+                          " name=\"file\";"
+                          " filename=\"" filename "\"\r\n"
+                          "Content-Type: " mime-type "\r\n"
+                          "\r\n")
+                  'utf-8))
+         (footer (encode-coding-string
+                  (concat "\r\n--" boundary "--\r\n")
+                  'utf-8))
+         ;; Read raw bytes in a dedicated unibyte buffer.
+         (file-data (with-temp-buffer
+                      (set-buffer-multibyte nil)
+                      (insert-file-contents-literally file-path)
+                      (buffer-string))))
+    ;; concat of all-unibyte strings → unibyte.
+    (concat header file-data footer)))
 
 (defun zulip--api-upload-file (conn file-path callback)
   "Upload FILE-PATH to CONN's Zulip server.\nCALLBACK is called with the upload URI string (e.g. \"/user_uploads/…\")\non success, or nil on failure."
