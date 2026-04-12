@@ -61,7 +61,60 @@ Each function is called with (CONN TYPE TO TOPIC).")
 \\[zulip-compose-cancel]  Cancel"
   (setq header-line-format
         (propertize " C-c C-c: Send  |  C-c C-a: Attach  |  C-c C-k: Cancel"
-                    'face 'bold)))
+                    'face 'bold))
+  (add-hook 'completion-at-point-functions
+            #'zulip-compose--mention-capf nil t))
+
+;;;; @-mention completion
+
+(defun zulip-compose--mention-capf ()
+  "Completion-at-point function for @-mentions in compose buffers.
+Completes user names after `@' and inserts Zulip syntax `@**Full Name**'.
+Also offers wildcard mentions: @all, @everyone, @channel, @topic."
+  (when (and zulip--compose-connection
+             (>= (point) (or zulip--compose-body-start (point-min))))
+    (let ((pos (point)))
+      (save-excursion
+        (when (re-search-backward "@\\([^@\n]*\\)" zulip--compose-body-start t)
+          (let* ((at-pos (match-beginning 0))
+                 ;; Only trigger if point is right after the prefix text
+                 (end (match-end 0)))
+            (when (= end pos)
+              (let* ((cache (zulip--connection-cache zulip--compose-connection))
+                     (candidates (zulip-compose--mention-candidates cache)))
+                (list (1+ at-pos) ; start after @
+                      pos         ; end at point
+                      candidates
+                      :exclusive 'no
+                      :exit-function #'zulip-compose--mention-exit)))))))))
+
+(defun zulip-compose--mention-candidates (cache)
+  "Build mention completion candidates from CACHE.
+Returns a list of strings: user full names plus wildcard keywords."
+  (let ((names nil))
+    (maphash
+     (lambda (_id user)
+       (unless (zulip--user-is-bot user)
+         (push (propertize (zulip--user-full-name user)
+                           'zulip-user-id (zulip--user-id user))
+               names)))
+     (zulip--cache-users cache))
+    (append (sort names #'string<)
+            '("all" "everyone" "channel" "topic"))))
+
+(defun zulip-compose--mention-exit (candidate status)
+  "After completing CANDIDATE with STATUS, wrap it in Zulip mention syntax.
+Replaces `@CANDIDATE' with `@**CANDIDATE**'."
+  (when (eq status 'finished)
+    ;; Point is right after the inserted candidate text.
+    ;; We need to wrap it: the text "CANDIDATE" → "**CANDIDATE**"
+    (let ((end (point))
+          (start (- (point) (length candidate))))
+      (goto-char end)
+      (insert "** ")
+      (goto-char start)
+      (insert "**")
+      (goto-char (+ end 3))))) ; position after "** "
 
 ;;;; Entry point
 

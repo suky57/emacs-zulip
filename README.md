@@ -9,6 +9,9 @@ A fast, zero-dependency Zulip chat client built entirely with built-in Emacs Lis
 - **Direct messages** — browse, read, and compose DM conversations
 - **Real-time updates** via Zulip's long-polling event API
 - **Message composition** with `C-c C-c` send / `C-c C-k` cancel
+- **@-mention completion** — type `@` in compose to complete user names (inserts `@**Name**` syntax); includes wildcard mentions (`@all`, `@everyone`, `@channel`, `@topic`)
+- **Mention highlighting** — `@user` mentions in messages are rendered with a distinct face (`zulip-mention`)
+- **File uploads** — attach files in compose (`C-c C-a`) or send directly from any buffer / dired (`M-x zulip-send-file`)
 - **Unread tracking** — counts shown in channel, topic, and DM lists
 - **HTML rendering** — messages rendered with `shr` (falls back to plain text)
 - **~/.zuliprc credentials** — auto-login from standard Zulip config file
@@ -18,7 +21,8 @@ A fast, zero-dependency Zulip chat client built entirely with built-in Emacs Lis
 ## Requirements
 
 - Emacs **27.1** or later (for native JSON via Jansson)
-- No MELPA/ELPA packages required — everything is built-in
+- **curl** (for file uploads — almost always pre-installed on macOS / Linux)
+- No MELPA/ELPA packages required — everything else is built-in
 
 ## Installation
 
@@ -145,6 +149,8 @@ site=https://personal.zulipchat.com
 | `zulip-home`          | Open home dashboard                             |
 | `zulip-channels`      | Open channel list                               |
 | `zulip-dms`           | Open DM conversations list                      |
+| `zulip-compose`       | Compose a new message (channel or DM)           |
+| `zulip-send-file`     | Upload & send a file (works from dired)         |
 | `zulip-switch-server` | Switch between connected servers                |
 | `zulip-logout`        | Disconnect from a server                        |
 | `zulip-test-connection` | Debug connectivity & auth                     |
@@ -192,18 +198,28 @@ When Evil mode is active, all Zulip buffers use **normal state** with vi-style b
 
 #### Doom leader keys (with `zulip-doom.el`)
 
-| Key         | Action       |
-|-------------|--------------|
-| `SPC o z`   | Zulip Home   |
-| `SPC o Z`   | Zulip Login  |
-| `SPC o C-z` | Zulip Connect|
+All commands live under `SPC o z` as a prefix:
+
+| Key           | Action         |
+|---------------|----------------|
+| `SPC o z h`   | Home           |
+| `SPC o z l`   | Login          |
+| `SPC o z c`   | Connect        |
+| `SPC o z C`   | Channels       |
+| `SPC o z d`   | DMs            |
+| `SPC o z m`   | Compose        |
+| `SPC o z a`   | Send file      |
+| `SPC o z s`   | Switch server  |
+| `SPC o z q`   | Logout         |
 
 ### Compose Buffer
 
-| Key       | Action       |
-|-----------|--------------|
-| `C-c C-c` | Send message |
-| `C-c C-k` | Cancel       |
+| Key       | Action                                    |
+|-----------|-------------------------------------------|
+| `C-c C-c` | Send message                              |
+| `C-c C-a` | Attach file (upload to Zulip)             |
+| `C-c C-k` | Cancel                                    |
+| `@`       | Start @-mention completion (user names, wildcards) |
 
 ## Navigation Flow
 
@@ -237,23 +253,24 @@ Home Dashboard
 
 ```
 zulip.el              ; entry point, login/logout, .zuliprc, connection management
-zulip-api.el          ; HTTP layer (url.el), auth, JSON, endpoint wrappers
+zulip-api.el          ; HTTP layer (url.el + curl for uploads), auth, JSON, API wrappers
 zulip-events.el       ; event queue registration & long-polling
 zulip-cache.el        ; in-memory hash-table cache (channels, topics, messages, users)
 zulip-ui.el           ; ewoc-based major modes (home, channels, topics, messages, DMs)
-zulip-compose.el      ; message composition buffer
-zulip-doom.el         ; optional Doom Emacs integration (SPC leader bindings)
-test/                 ; ERT test suite
+zulip-compose.el      ; message composition, @-mention completion, file attachment
+zulip-doom.el         ; optional Doom Emacs integration (SPC o z leader bindings)
+test/                 ; ERT test suite (98 tests)
 Makefile              ; compile, test, lint, clean
 ```
 
 ### Key design decisions
 
-- **Zero external dependencies** — only built-in Emacs packages (`url.el`, `json.el`, `cl-lib`, `ewoc`, `shr`)
-- **Async I/O** — all HTTP via `url-retrieve` (non-blocking); callbacks deferred to main loop with `run-at-time`
+- **Zero external dependencies** — only built-in Emacs packages (`url.el`, `json.el`, `cl-lib`, `ewoc`, `shr`) plus `curl` for file uploads
+- **Async I/O** — all HTTP via `url-retrieve` (non-blocking); file uploads via async `curl` subprocess (works around Emacs Bug#23750); callbacks deferred with `run-at-time`
 - **Hash-table cache** — O(1) lookups for channels, topics, messages, users, and presence
 - **ewoc rendering** — efficient partial re-rendering for list UIs
 - **Multi-instance** — each connection owns its own auth, event queue, and cache
+- **completion-at-point** — @-mention completion integrates with Emacs's standard CAPF framework (works with `company`, `corfu`, default `*Completions*`)
 
 ## Development
 

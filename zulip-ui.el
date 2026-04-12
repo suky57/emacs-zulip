@@ -126,6 +126,11 @@ Otherwise fall back to plain-text tag stripping."
   "Face for DM conversation names."
   :group 'zulip)
 
+(defface zulip-mention
+  '((t :inherit font-lock-warning-face :weight bold))
+  "Face for @-mentions in messages."
+  :group 'zulip)
+
 ;;;; Timestamp formatting
 
 (defun zulip--format-timestamp (unix-time)
@@ -159,6 +164,8 @@ Evil uses `g' as a prefix key, so refresh is bound to `gr'."
       (let ((dom (with-temp-buffer
                    (insert html)
                    (libxml-parse-html-region (point-min) (point-max)))))
+        ;; Pre-process DOM: apply mention faces to user-mention spans
+        (zulip--dom-highlight-mentions dom)
         (let ((shr-use-fonts nil)
               (shr-width (min 80 (- (window-width) 4)))
               (shr-base (when (bound-and-true-p zulip--current-connection)
@@ -167,6 +174,31 @@ Evil uses `g' as a prefix key, so refresh is bound to `gr'."
                             zulip--current-connection)))))
           (shr-insert-document dom)))
     (insert (zulip--strip-html html))))
+
+(defun zulip--dom-highlight-mentions (dom)
+  "Walk DOM tree and mark user-mention / user-group-mention spans.
+Adds a `face' property so `shr' renders them with `zulip-mention'."
+  (when (consp dom)
+    (let ((tag (car dom))
+          (attrs (cadr dom)))
+      (when (and (eq tag 'span)
+                 (stringp (cdr (assq 'class attrs)))
+                 (string-match-p
+                  "\\(?:user-mention\\|user-group-mention\\|topic-mention\\)"
+                  (cdr (assq 'class attrs))))
+        ;; Wrap text children with a face property.
+        ;; We modify the DOM node in place: replace string children
+        ;; with propertized versions.
+        (setcdr (cdr dom)
+                (mapcar
+                 (lambda (child)
+                   (if (stringp child)
+                       (propertize child 'face 'zulip-mention)
+                     child))
+                 (cddr dom)))))
+    ;; Recurse into children
+    (dolist (child (cddr dom))
+      (zulip--dom-highlight-mentions child))))
 
 (defun zulip--strip-html (html)
   "Strip HTML tags from HTML, preserving basic structure."

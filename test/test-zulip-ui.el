@@ -190,6 +190,57 @@ Each element of USERS is (id email full-name &optional is-bot)."
       (should (string= (zulip--read-topic conn "nonexistent")
                         "new-topic")))))
 
+;;;; zulip--dom-highlight-mentions
+
+(ert-deftest zulip-ui-dom-highlight-user-mention ()
+  "User-mention span text gets `zulip-mention' face."
+  (let ((dom '(span ((class . "user-mention")) "@Alice")))
+    (zulip--dom-highlight-mentions dom)
+    (let ((text (nth 2 dom)))
+      (should (stringp text))
+      (should (eq (get-text-property 0 'face text) 'zulip-mention)))))
+
+(ert-deftest zulip-ui-dom-highlight-silent-mention ()
+  "Silent user-mention (class contains \"user-mention silent\") is highlighted."
+  (let ((dom '(span ((class . "user-mention silent")) "Alice")))
+    (zulip--dom-highlight-mentions dom)
+    (let ((text (nth 2 dom)))
+      (should (eq (get-text-property 0 'face text) 'zulip-mention)))))
+
+(ert-deftest zulip-ui-dom-highlight-group-mention ()
+  "User-group-mention spans are highlighted."
+  (let ((dom '(span ((class . "user-group-mention")) "@support")))
+    (zulip--dom-highlight-mentions dom)
+    (should (eq (get-text-property 0 'face (nth 2 dom)) 'zulip-mention))))
+
+(ert-deftest zulip-ui-dom-highlight-topic-mention ()
+  "Topic-mention spans are highlighted."
+  (let ((dom '(span ((class . "topic-mention")) "@topic")))
+    (zulip--dom-highlight-mentions dom)
+    (should (eq (get-text-property 0 'face (nth 2 dom)) 'zulip-mention))))
+
+(ert-deftest zulip-ui-dom-highlight-nested ()
+  "Mentions nested inside other elements are found and highlighted."
+  (let ((dom '(p nil
+                "Hello "
+                (span ((class . "user-mention") (data-user-id . "42"))
+                      "@Bob")
+                " how are you?")))
+    (zulip--dom-highlight-mentions dom)
+    ;; The span child should be propertized
+    (let ((span (nth 3 dom)))
+      (should (eq (car span) 'span))
+      (let ((text (nth 2 span)))
+        (should (eq (get-text-property 0 'face text) 'zulip-mention))))
+    ;; Plain text siblings should not be affected
+    (should (null (get-text-property 0 'face (nth 2 dom))))))
+
+(ert-deftest zulip-ui-dom-highlight-no-false-positive ()
+  "Spans without mention classes are not highlighted."
+  (let ((dom '(span ((class . "emoji")) ":smile:")))
+    (zulip--dom-highlight-mentions dom)
+    (should (null (get-text-property 0 'face (nth 2 dom))))))
+
 ;;;; zulip--refresh-key-hint
 
 (ert-deftest zulip-ui-refresh-hint-no-evil ()
