@@ -338,9 +338,16 @@ CALLBACK receives parsed register response or nil."
          (file-data (with-temp-buffer
                       (set-buffer-multibyte nil)
                       (insert-file-contents-literally file-path)
+                      ;; Re-assert unibyte — insert-file-contents-literally
+                      ;; can flip the multibyte flag in some Emacs builds.
+                      (set-buffer-multibyte nil)
                       (buffer-string))))
     ;; concat of all-unibyte strings → unibyte.
-    (concat header file-data footer)))
+    ;; Final encode-coding-string guards against any edge case where
+    ;; an intermediate value was unexpectedly multibyte (no-op when
+    ;; already unibyte).
+    (encode-coding-string (concat header file-data footer)
+                          'no-conversion)))
 
 (defun zulip--api-upload-file (conn file-path callback)
   "Upload FILE-PATH to CONN's Zulip server.\nCALLBACK is called with the upload URI string (e.g. \"/user_uploads/…\")\non success, or nil on failure."
