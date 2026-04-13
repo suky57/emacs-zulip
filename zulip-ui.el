@@ -1122,23 +1122,26 @@ topics are cached."
                                           (gethash "id" b))))
                                ","))))
                   (when (and key (not (gethash key seen)))
-                    (puthash key t seen)
-                    (push (zulip--dm-entry-create
-                           :name (if others
-                                     (mapconcat
-                                      (lambda (u)
-                                        (gethash "full_name" u))
-                                      others ", ")
-                                   "Self")
-                           :emails (if others
-                                       (mapconcat
-                                        (lambda (u)
-                                          (gethash "email" u))
-                                        others ",")
-                                     "")
-                           :last-msg-id (gethash "id" m)
-                           :timestamp (gethash "timestamp" m))
-                          entries))))
+		    (puthash key t seen)
+		    (let* ((self-user  (zulip--cache-get-user
+					(zulip--connection-cache conn) my-id))
+			   (self-email (if self-user
+					   (zulip--user-email self-user)
+					 (zulip--connection-email conn))))
+		      (push (zulip--dm-entry-create
+			     :name (if others
+				       (mapconcat
+					(lambda (u) (gethash "full_name" u))
+					others ", ")
+				     "Self")
+			     :emails (if others
+					 (mapconcat
+					  (lambda (u) (gethash "email" u))
+					  others ",")
+				       self-email)   ;; own email for self-DMs
+			     :last-msg-id (gethash "id" m)
+			     :timestamp   (gethash "timestamp" m))
+			    entries)))))
               msgs))
            (zulip-dm-list--render conn (nreverse entries))))))))
 
